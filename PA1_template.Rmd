@@ -1,22 +1,140 @@
----
-title: "Reproducible Research: Peer Assessment 1"
----
+# Reproducible Research: Peer Assessment 1
 
 
 ## Loading and preprocessing the data
 
+We first check the current directory and unzip if necessary.
+```{R echo=TRUE}
+if(!file.exists("activity.csv") & file.exists("activity.zip")) {
+    library(utils)
+    unzip("activity.zip")
+}
+```
+
+We then read in the data file and transform it.
+```{R echo=TRUE}
+activityData <- read.csv("activity.csv")
+activityData$start <- as.POSIXlt(paste0(activityData$date," ",
+                                        activityData$interval%/%100,":",
+                                        activityData$interval%%100,":00"))
+activityData$date <- as.Date(activityData$date)
+activityData$day <- weekdays(activityData$date)
+activityData$missing <- is.na(activityData$steps)
+str(activityData)
+```
 
 
 ## What is mean total number of steps taken per day?
 
+We decide not to include the days that have any missing values,
+since they may unnecessarily bias other summary statistics.
+```{R echo=TRUE}
+q1data <- aggregate(activityData$steps,
+                    list(activityData$date),
+                    sum,na.rm=FALSE)
+hist(q1data$x,
+     main="Histogram of total steps per day",
+     xlab="Steps per day")
+message("The mean number of steps taken per day is ",
+        format(mean(q1data$x,na.rm=TRUE),.3,scientific=FALSE), ".")
+message("The median number of steps taken per day is ",
+        median(q1data$x,na.rm=TRUE), ".")
+```
 
 
 ## What is the average daily activity pattern?
 
+The average number of steps per 5-min intervals are as follows.
+```{R echo=TRUE}
+q2data <- aggregate(activityData$steps,
+                    list(activityData$interval),
+                    mean,na.rm=TRUE)
+q2data$Group.1 <- 60*(q2data$Group.1%/%100) + q2data$Group.1%%100
+plot(q2data$Group.1,q2data$x,type="l",
+     main="Average daily acvitiy pattern",
+     xlab="Minutes from 12:00 AM",ylab="Mean steps")
+message("The maximum occurs during 5 mins from ",
+        q2data[which.max(q2data$x),1]%/%60, ":",
+        q2data[which.max(q2data$x),1]%%60, ".")
+```
 
 
 ## Imputing missing values
 
+The total number of missing values in the dataset is
+```{R echo=TRUE}
+sum(activityData$missing)
+```
+
+However, a more detailed view on the distribution of missing values reveals
+that each date's data points are either complete or none.
+```{R echo=TRUE}
+q3data <- merge(aggregate(activityData$missing,list(activityData$date),sum),
+                aggregate(activityData$missing,list(activityData$date),length),
+                by="Group.1")
+q3data$z <- 100*q3data$x.x/q3data$x.y
+q3data$x.x <- NULL
+q3data$x.y <- NULL
+names(q3data) <- c("date","missing%")
+q3data$day <- weekdays(q3data$date)
+q3data[q3data$"missing%">0,]
+```
+
+Therefore, we impute the missing value by taking the median value
+of the corresponding time slot for the same day of the week.
+```{R echo=TRUE}
+q3data <- aggregate(activityData$steps,
+                    list(activityData$day,activityData$interval),
+                    median,na.rm=TRUE)
+names(q3data) <- c("day","interval","median")
+activityData2 <- merge(activityData,q3data,by=c("day","interval"))
+activityData2 <- activityData2[order(activityData2$date),]
+rownames(activityData2) <- NULL
+activityData2$steps[activityData2$missing] <- activityData2$median[activityData2$missing]
+activityData2$median <- NULL
+activityData2 <- activityData2[,c(3,4,2,5)]
+```
+
+If we repeate the very first step using this imputed dataset,
+we get the following results.
+```{R echo=TRUE}
+q3data <- aggregate(activityData2$steps,
+                    list(activityData2$date),
+                    sum)
+hist(q3data$x,
+     main="Histogram of total steps per day",
+     xlab="Steps per day")
+message("The mean number of steps taken per day is ",
+        format(mean(q3data$x),.3,scientific=FALSE), ".")
+message("The median number of steps taken per day is ",
+        median(q3data$x), ".")
+```
+We can observe that the distribution has a fatter left tail,
+thus the mean and median values are decreased by the imputation.
 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+We first create a new factor variable in the imputed dataset
+with two levels - "weekday" and "weekend"
+indicating whether a given date is a weekday or weekend day.
+```{R echo=TRUE}
+activityData2$workweek <- "weekdays"
+activityData2$workweek[weekdays(activityData2$date) %in% c("Saturday","Sunday")] <- "weekend"
+activityData2$workweek <- factor(activityData2$workweek)
+```
+
+Then, we contrast the daily activity between weekdays and weekend days:
+```{R echo=TRUE}
+q4data <- aggregate(activityData2$steps,
+                    list(activityData2$workweek,activityData2$interval),
+                    mean,na.rm=TRUE)
+q4data$Group.2 <- 60*(q4data$Group.2%/%100) + q4data$Group.2%%100
+names(q4data) <- c("workweek","interval","steps")
+library(lattice)
+xyplot(steps~interval|workweek,data=q4data,layout=c(1,2),type="l")
+```
+
+During weekends, the person starts taking steps later in time than weekdays.
+In addition, the person remains relatively more active throughout the day
+during weekends compared to weekdays.
